@@ -12,27 +12,26 @@ inputs:
       commands. The post-job step removes the PAT.
       needs delete:packages permissions
     required: true
-  repository_owner:
+  repository-owner:
     description: 'The repository owner name'
     default: ${{ github.repository_owner }}
-    required: true
-  repository:
-    description: 'Delete only from repository name'
     required: false
-  package_name:
+  repository-name:
+    description: 'Delete only from repository name'
+    default: ""
+    required: false
+  package-name:
     description: 'Delete only from package name'
     required: false
-  untagged_only:
-      description: 'Delete only package versions without tag'
-      default: true
-  except_untagged_multiplatform:
-    description: 'Except untagged multiplatform packages from deletion (only for --untagged_only)'
-    default: false
-  owner_type:
-      description : "Owner type (org or user)"
-      required: true
-  dry_run:
-    description: "ORun the script without making any changes."
+    default: ""
+  owner-type:
+    description : "Owner type (org or user)"
+    required: true
+    options:
+      - org
+      - user
+  dry-run:
+    description: "Run the script without making any changes."
     required: false
     default: false
 
@@ -51,18 +50,10 @@ runs:
       shell: bash
       run: |
         args="--token ${{ inputs.token }} "
-        args+="--dry-run ${{ inputs.dry_run }} "
-        args+="--owner ${{ inputs.repository_owner }} "
-        if [[ $repo ]]; then
-          args+="--repo-name $repo "
-        fi
-        if [[ $pkg ]]; then
-          args+="--package-name $pkg "
-        fi
-        args+="--except-untagged-multiplatform ${{ inputs.except_untagged_multiplatform }} "
-        args+="--owner-type ${{ inputs.owner_type }}"
+        args+="--dry-run ${{ inputs.dry-run }} "
+        args+="--repo-owner ${{ inputs.repository-owner }} "
+        args+="--repo-name ${{ inputs.repository-name }} "
+        args+="--package-name ${{ inputs.package-name }} "
+        args+="--owner-type ${{ inputs.owner-type }}"
         echo "args: $args"
         python ${{ github.action_path }}/clean_ghcr.py $args
-      env:
-        repo: ${{ inputs.repository }}
-        pkg: ${{ inputs.package_name }}

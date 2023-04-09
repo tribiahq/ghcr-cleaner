@@ -30,24 +30,20 @@ def get_args():
         help="Github Personal access token with delete:packages permissions",
     )
     parser.add_argument(
-        "--owner", type=str.lower, required=True,
+        "--repo-owner", type=str.lower, required=True,
         help="The repository owner name",
     )
     parser.add_argument(
-        "--repo-name", type=str.lower, required=False, default="",
+        "--repo-name", type=str.lower, required=False, nargs="?", const="", default="",
         help="Delete containers only from this repository",
     )
     parser.add_argument(
-        "--package-name", type=str.lower, required=False, default="",
+        "--package-name", type=str.lower, required=False, nargs="?", const="", default="",
         help="Delete only package name",
     )
     parser.add_argument(
-        "--owner-type", choices=["org", "user"], default="org",
+        "--owner-type", type=str.lower, choices=["org", "user"], default="org",
         help="Owner type (org or user)",
-    )
-    parser.add_argument(
-        "--except-untagged-multiplatform", type=str2bool,
-        help="Exempt untagged multiplatform packages from deletion, needs docker installed",
     )
     parser.add_argument(
         "--dry-run", type=str2bool, default=False,
@@ -67,7 +63,6 @@ def get_args():
 
     # Strip any leading or trailing '/'
     args.package_name = args.package_name.strip("/")
-
     return args
 
 
@@ -88,7 +83,7 @@ def get_paged_resp(url: str, params: dict[str, Any] = None) -> Iterable[dict]:
     """Return an iterator of paged results, looping until all resources are collected."""
     params = params or {}
     params.update(page="1")
-    params.setdefault("per_page", PER_PAGE)
+    params.setdefault("per_page", min(PER_PAGE, 100))
     url = urljoin(API_ENDPOINT, url)
 
     while True:
@@ -107,12 +102,12 @@ def get_paged_resp(url: str, params: dict[str, Any] = None) -> Iterable[dict]:
             break
 
 
+PER_PAGE = 100
 DOCKER_ENDPOINT = "ghcr.io"
 API_ENDPOINT = os.environ.get("GITHUB_API_URL", "https://api.github.com")
-PER_PAGE = 100  # max 100 defaults 30
 _args = get_args()
 
-REPO_OWNER = _args.owner
+REPO_OWNER = _args.repo_owner
 REPO_NAME = _args.repo_name
 PACKAGE_NAME = _args.package_name
 OWNER_TYPE = _args.owner_type
@@ -223,26 +218,39 @@ def run():
         owner_type=OWNER_TYPE,
     )
 
-    all_deps, all_untagged = set(), set()
+    delete_list = []
     for pkg in all_packages:
-        for version in pkg.get_versions():
+        count = 0
+        all_deps, all_untagged = set(), set()
+        print("Processing package:", pkg.name, end="... ")
+        for count, version in enumerate(pkg.get_versions(), start=1):
             deps = version.get_deps()
             all_deps.update(deps)
-
             if not version.tags:
                 all_untagged.add(version)
 
-    all_deps = frozenset(all_deps)
-    status_counts = [0, 0]  # [Fail, OK]
-    for untagged_version in all_untagged:
-        if untagged_version.name not in all_deps:
-            status = untagged_version.delete()
+        # Collect list of all untagged versions that are not dependencies of other versions
+        unwanted = [version for version in all_untagged if version.name not in all_deps]
+        delete_list.extend(unwanted)
+        print(
+            f"(total={count},",
+            f"tagged={count - len(all_untagged)},",
+            f"untagged={len(all_untagged)},",
+            f"unwanted={len(unwanted)})",
+        )
+
+    if delete_list:
+        print("")
+        print("Deleting unwanted versions")
+        status_counts = [0, 0]  # [Fail, OK]
+        for unwanted_version in delete_list:
+            status = unwanted_version.delete()
             status_counts[status] += 1
 
-    print(status_counts[1], "Deletions")
-    print(status_counts[0], "Errors")
-    if status_counts[0]:
-        sys.exit(1)
+        print(status_counts[1], "Deletions")
+        print(status_counts[0], "Errors")
+        if status_counts[0]:
+            sys.exit(1)
 
 
 if __name__ == "__main__":
