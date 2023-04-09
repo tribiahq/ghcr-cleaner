@@ -93,6 +93,7 @@ def get_paged_resp(url: str, params: dict[str, Any] = None) -> Iterable[dict]:
 
     while True:
         if not (resp := request_github_api(url, params=params)):
+            print(url)
             raise Exception(resp.text)
 
         for objs in resp.json():
