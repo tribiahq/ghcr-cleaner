@@ -56,4 +56,4 @@ runs:
         args+="--package-name ${{ inputs.package-name }} "
         args+="--owner-type ${{ inputs.owner-type }}"
         echo "args: $args"
-        python ${{ github.action_path }}/clean_ghcr.py $args
+        python ${{ github.action_path }}/action.py $args
