@@ -1,0 +1,20 @@
+name: Release Action
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  tag-it:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract version data
+        id: versions
+        uses: battila7/get-version-action@v2
+
+      - name: Tag Action
+        uses: richardsimko/update-tag@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ steps.versions.outputs.major }}
