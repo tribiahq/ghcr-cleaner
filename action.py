@@ -1,7 +1,15 @@
+#!/usr/bin/env python3
+
+"""
+GHCR untagged cleaner
+
+Deletes all truly untagged GHCR containers in a repository. Tags that are not depended on by other tags
+will be deleted. This scenario can happen when using multi arch packages.
+"""
+
 # Standard lib
 from typing import Iterable, Any
 from urllib.parse import urljoin
-from functools import cache
 import argparse
 import json
 import sys
@@ -10,6 +18,7 @@ import os
 # Third party
 import requests
 from dxf import DXF
+from colorama import Fore
 
 
 def str2bool(value: str) -> bool:
@@ -83,6 +92,7 @@ def request_github_api(url: str, method="GET", **options) -> requests.Response:
             "Accept": "application/vnd.github+json",
             "Authorization": f"Bearer {GITHUB_TOKEN}",
         },
+        timeout=options.pop("timeout", 10),
         **options
     )
 
@@ -95,10 +105,8 @@ def get_paged_resp(url: str, params: dict[str, Any] = None) -> Iterable[dict]:
     url = urljoin(API_ENDPOINT, url)
 
     while True:
-        if not (resp := request_github_api(url, params=params)):
-            print(url)
-            raise Exception(resp.text[:50])
-
+        resp = request_github_api(url, params=params)
+        resp.raise_for_status()
         yield from resp.json()
 
         # Continue with next page if one is found
@@ -109,26 +117,20 @@ def get_paged_resp(url: str, params: dict[str, Any] = None) -> Iterable[dict]:
             break
 
 
-class TC:
-    """Ascii color codes."""
-    OKGREEN = lambda x: f"\033[92m{x}\033[0m"
-    OKBLUE = lambda x: f"\033[94m{x}\033[0m"
-    OKCYAN = lambda x: f"\033[96m{x}\033[0m"
-    WARNING = lambda x: f"\033[93m{x}\033[0m"
-    FAIL = lambda x: f"\033[91m{x}\033[0m"
-
-
 class Version:
+    """Class for each version of a docker registry package."""
     def __init__(self, pkg: "Package", version):
         self.version = version
         self.pkg = pkg
 
     @property
     def id(self):
+        """Return the version ID."""
         return self.version["id"]
 
     @property
     def name(self) -> str:
+        """Return the sha256 of the image version as the version name."""
         return self.version["name"]
 
     @property
@@ -136,7 +138,6 @@ class Version:
         """Return list of tags for this version."""
         return self.version["metadata"]["container"]["tags"]
 
-    @cache
     def get_deps(self) -> list[str]:
         """Return list of untagged images that this version depends on."""
         if self.tags:
@@ -148,18 +149,18 @@ class Version:
 
     def delete(self):
         """Delete this image version from the registry."""
-        print(TC.WARNING("Deleting"), f"{self.name}:", end=" ")
+        print(Fore.YELLOW + "Deleting" + Fore.RESET, f"{self.name}:", end=" ")
         if DRY_RUN:
-            print(TC.OKGREEN("Dry Run"))
+            print(Fore.YELLOW + "Dry Run" + Fore.RESET)
             return True
 
         try:
             resp = request_github_api(self.version["url"], method="DELETE")
-        except requests.RequestException as e:
-            print(e.response.reason if e.response else "Fatal error")
+        except requests.RequestException as err:
+            print(err.response.reason if err.response else "Fatal error")
             return False
         else:
-            print(TC.OKGREEN("OK") if resp.status_code == 204 else resp.reason)
+            print(Fore.GREEN + "OK" + Fore.RESET if resp.status_code == 204 else Fore.RED + resp.reason + Fore.RESET)
             return resp.ok
 
     def __hash__(self):
@@ -168,11 +169,11 @@ class Version:
     def __eq__(self, other):
         if isinstance(other, self.__class__):
             return self.id == other.id
-        else:
-            return False
+        return False
 
 
 class Package:
+    """Class for each package on the registry."""
     def __init__(self, owner: str, pkg_data):
         self.pkg = pkg_data
         self.owner = owner
@@ -185,6 +186,7 @@ class Package:
 
     @property
     def name(self) -> str:
+        """Return the package name."""
         return self.pkg["name"]
 
     @property
@@ -206,26 +208,27 @@ class Package:
             if repo_name and pkg.get("repository", {}).get("name", "").lower() != repo_name.lower():
                 continue
 
-            elif package_name and pkg["name"] != package_name:
+            if package_name and pkg["name"] != package_name:
                 continue
 
             yield cls(owner, pkg)
 
 
-def bulk_delete(delete_list: Iterable[Version]):
+def bulk_delete(delete_list: Iterable[Version]) -> int:
+    """Take a give list of image version to delete and delete them."""
     status_counts = [0, 0]  # [Fail, OK]
     for unwanted_version in delete_list:
         status = unwanted_version.delete()
         status_counts[status] += 1
 
     print("")
-    print(status_counts[1], TC.OKGREEN("Deletions"))
-    print(status_counts[0], TC.FAIL("Errors"))
-    if status_counts[0]:
-        sys.exit(1)
+    print(status_counts[1], Fore.GREEN + "Deletions" + Fore.RESET)
+    print(status_counts[0], Fore.RED + "Errors" + Fore.RESET)
+    return bool(status_counts[0])
 
 
 def run() -> Iterable[Version]:
+    """Scan the GitHub container registry for untagged image versions."""
     # Get list of all packages
     all_packages = Package.get_all_packages(
         owner=_args.repo_owner,
@@ -237,7 +240,7 @@ def run() -> Iterable[Version]:
     for pkg in all_packages:
         count = 0
         all_deps, all_untagged = set(), set()
-        print(TC.OKCYAN("Processing package:"), TC.OKBLUE(pkg.name), end="... ")
+        print(Fore.CYAN + "Processing package:", Fore.BLUE + pkg.name + Fore.RESET, end="... ")
         for count, version in enumerate(pkg.get_versions(), start=1):
             deps = version.get_deps()
             all_deps.update(deps)
@@ -247,14 +250,14 @@ def run() -> Iterable[Version]:
         # Collect list of all untagged versions that are not dependencies of other versions
         unwanted = [version for version in all_untagged if version.name not in all_deps]
         print(
-            f"({TC.OKGREEN('total')}={count},",
-            f"{TC.OKGREEN('tagged')}={count - len(all_untagged)},",
-            f"{TC.OKGREEN('untagged')}={len(all_untagged)},",
-            f"{TC.OKGREEN('unwanted')}={len(unwanted)})",
+            f"({Fore.GREEN + 'total' + Fore.RESET}={count},",
+            f"{Fore.GREEN + 'tagged' + Fore.RESET}={count - len(all_untagged)},",
+            f"{Fore.GREEN + 'untagged' + Fore.RESET}={len(all_untagged)},",
+            f"{Fore.GREEN + 'unwanted' + Fore.RESET}={len(unwanted)})",
         )
         yield from unwanted
 
 
 if __name__ == "__main__":
     _delete_list = run()
-    bulk_delete(_delete_list)
+    sys.exit(bulk_delete(_delete_list))
