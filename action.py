@@ -10,7 +10,10 @@ will be deleted. This scenario can happen when using multi arch packages.
 # Standard lib
 from typing import Iterable, Any
 from urllib.parse import urljoin
+from operator import attrgetter
+from datetime import datetime
 import argparse
+import fnmatch
 import json
 import sys
 import os
@@ -29,6 +32,31 @@ def str2bool(value: str) -> bool:
         return False
     else:
         raise argparse.ArgumentTypeError("Boolean value expected.")
+
+
+class ArgList(argparse.Action):
+    """
+    Handle a list of values passed in from GitHub actions.
+    There are a few different ways that a list of values can be passed.
+
+    Options are:
+        * value1,value2
+        * value1, value2
+        * [value1, value2]
+        * |
+          value1
+          value2
+
+    We use an action to do this cause spaces causes issues. And we need to use nargs * witch
+    collects the values with spaces as a list. This class handles that case.
+    """
+
+    # noinspection PyMethodOverriding
+    def __call__(self, _, namespace, values, __):
+        # Convert from list back to string for easier parsing
+        value = ",".join(values).strip("[").strip("]")
+        value = list(filter(None, map(str.strip, value.replace("\n", ",").split(","))))
+        setattr(namespace, self.dest, value)
 
 
 def get_args():
@@ -58,6 +86,22 @@ def get_args():
         "--dry-run", type=str2bool, default=False,
         help="Run the script without making any changes.",
     )
+    parser.add_argument(
+        "--delete-untagged", type=str2bool, default=True,
+        help="Delete package versions that have no tags and are not a dependency of other tags.",
+    )
+    parser.add_argument(
+        "--keep-at-most", type=int, default=5,
+        help="Keep at most the given amount of image versions. Only applies to tagged image versions.",
+    )
+    parser.add_argument(
+        "--filter-tags", action=ArgList, nargs="*",
+        help="List of tags to filter for when using --keep-at-most. Accepts tags as Unix shell-style wildcards.",
+    )
+    parser.add_argument(
+        "--skip-tags", action=ArgList, nargs="*",
+        help="List of tags to ignore when using --keep-at-most. Accepts tags as Unix shell-style wildcards.",
+    )
 
     args = parser.parse_args()
 
@@ -81,6 +125,7 @@ DOCKER_ENDPOINT = "ghcr.io"
 API_ENDPOINT = os.environ.get("GITHUB_API_URL", "https://api.github.com")
 GITHUB_TOKEN = _args.token
 DRY_RUN = _args.dry_run
+print(_args)
 
 
 def request_github_api(url: str, method="GET", **options) -> requests.Response:
@@ -129,19 +174,32 @@ class Version:
         return self.version["id"]
 
     @property
-    def name(self) -> str:
-        """Return the sha256 of the image version as the version name."""
+    def digest(self) -> str:
+        """Return the sha256 digest of the image version."""
         return self.version["name"]
+
+    @property
+    def date(self) -> datetime:
+        """Return the date the version was created/updated."""
+        created = self.version["updated_at"].replace("Z", "+00:00")
+        return datetime.fromisoformat(created)
 
     @property
     def tags(self) -> list[str]:
         """Return list of tags for this version."""
         return self.version["metadata"]["container"]["tags"]
 
+    def match_tags(self, patterns) -> bool:
+        """Return True if any of the patterns match any tags using glob matching, else False."""
+        for pattern in patterns:
+            if fnmatch.filter(self.tags, pattern):
+                return True
+        return False
+
     def get_deps(self) -> list[str]:
         """Return list of untagged images that this version depends on."""
         if self.tags:
-            manifest = self.pkg.registry.get_manifest(self.name)
+            manifest = self.pkg.registry.get_manifest(self.digest)
             manifest = json.loads(manifest)
             return [arch["digest"] for arch in manifest.get("manifests", [])]
         else:
@@ -149,9 +207,9 @@ class Version:
 
     def delete(self):
         """Delete this image version from the registry."""
-        print(Fore.YELLOW + "Deleting" + Fore.RESET, f"{self.name}:", end=" ")
+        print(Fore.YELLOW + "Deleting" + Fore.RESET, f"{self.digest}:", end=" ")
         if DRY_RUN:
-            print(Fore.YELLOW + "Dry Run" + Fore.RESET)
+            print(Fore.GREEN + "Dry Run" + Fore.RESET)
             return True
 
         try:
@@ -238,26 +296,64 @@ def run() -> Iterable[Version]:
     )
 
     for pkg in all_packages:
-        count = 0
-        all_deps, all_untagged = set(), set()
+        unwanted = set()
+        tagged, untagged = [], []
         print(Fore.CYAN + "Processing package:", Fore.BLUE + pkg.name + Fore.RESET, end="... ")
-        for count, version in enumerate(pkg.get_versions(), start=1):
-            deps = version.get_deps()
-            all_deps.update(deps)
-            if not version.tags:
-                all_untagged.add(version)
+        for version in pkg.get_versions():
+            if version.tags:
+                tagged.append(version)
+            else:
+                untagged.append(version)
 
-        # Collect list of all untagged versions that are not dependencies of other versions
-        unwanted = [version for version in all_untagged if version.name not in all_deps]
+        tag_count = len(tagged)
+        # Keep the most recent image versions of the given amount
+        # We Need to filter out the old tags first, before we attempt deleting any untagged images
+        if _args.keep_at_most > 0:
+            sortable_list = []
+            for version in tagged:
+                # Skip if we have skip tags, and we find a match
+                if _args.skip_tags and version.match_tags(_args.skip_tags):
+                    continue
+
+                # Skip if we have filter tags, and we do not find a match
+                if _args.filter_tags and not version.match_tags(_args.filter_tags):
+                    continue
+
+                sortable_list.append(version)
+
+            # Remove all old versions after the most recent count is hit
+            sorted_tagged = sorted(sortable_list, key=attrgetter("date"), reverse=True)
+            for count, version in enumerate(sorted_tagged, start=1):
+                if count > _args.keep_at_most:
+                    unwanted.add(version)
+
+            # We will want to reset the tagged list here, to stop delete_untagged from scanning unwanted versions
+            tagged = [version for version in tagged if version not in unwanted]
+
+        # Delete untagged versions
+        if _args.delete_untagged:
+            tag_dependencies = set()
+            # Build set of dependencies
+            for version in tagged:
+                deps = version.get_deps()
+                tag_dependencies.update(deps)
+
+            # Collect list of all untagged versions that are not dependencies of other versions
+            unwanted.update(version for version in untagged if version.digest not in tag_dependencies)
+
         print(
-            f"({Fore.GREEN + 'total' + Fore.RESET}={count},",
-            f"{Fore.GREEN + 'tagged' + Fore.RESET}={count - len(all_untagged)},",
-            f"{Fore.GREEN + 'untagged' + Fore.RESET}={len(all_untagged)},",
+            f"({Fore.GREEN + 'total' + Fore.RESET}={tag_count + len(untagged)},",
+            f"{Fore.GREEN + 'tagged' + Fore.RESET}={tag_count},",
+            f"{Fore.GREEN + 'untagged' + Fore.RESET}={len(untagged)},",
             f"{Fore.GREEN + 'unwanted' + Fore.RESET}={len(unwanted)})",
         )
         yield from unwanted
 
 
 if __name__ == "__main__":
-    _delete_list = run()
-    sys.exit(bulk_delete(_delete_list))
+    try:
+        _delete_list = run()
+        exit_code = bulk_delete(_delete_list)
+        sys.exit(exit_code)
+    except KeyboardInterrupt:
+        sys.exit(130)

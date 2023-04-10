@@ -13,23 +13,39 @@ inputs:
       needs delete:packages permissions
     required: true
   repository-owner:
-    description: 'The repository owner name'
+    description: "The repository owner name."
     default: ${{ github.repository_owner }}
     required: false
   repository-name:
-    description: 'Delete only from repository name'
+    description: "Delete only from repository name."
     default: ""
     required: false
   package-name:
-    description: 'Delete only from package name'
+    description: "Delete only from package name."
     required: false
     default: ""
   owner-type:
-    description : "Owner type (org or user)"
+    description : "Owner type (org or user)."
     required: true
     options:
       - org
       - user
+  delete-untagged:
+    description: "Delete package versions that have no tags and are not a dependency of other tags."
+    required: false
+    default: true
+  keep-at-most:
+    description: "Keep at most the given amount of image versions. Only applies to tagged image versions."
+    required: false
+    default: 0
+  filter-tags:
+    description: "List of tags to filter for when using --keep-at-most. Accepts tags as Unix shell-style wildcards."
+    required: false
+    default: ""
+  skip-tags:
+    description: "List of tags to ignore when using --keep-at-most. Accepts tags as Unix shell-style wildcards."
+    required: false
+    default: ""
   dry-run:
     description: "Run the script without making any changes."
     required: false
@@ -54,6 +70,11 @@ runs:
         args+="--repo-owner ${{ inputs.repository-owner }} "
         args+="--repo-name ${{ inputs.repository-name }} "
         args+="--package-name ${{ inputs.package-name }} "
-        args+="--owner-type ${{ inputs.owner-type }}"
+        args+="--owner-type ${{ inputs.owner-type }} "
+        args+="--delete-untagged ${{ inputs.delete-untagged }} "
+        args+="--keep-at-most ${{ inputs.keep-at-most }} "
+        args+="--filter-tags ${{ inputs.filter-tags }} "
+        args+="--skip-tags ${{ inputs.skip-tags }} "
+        
         echo "args: $args"
         python ${{ github.action_path }}/action.py $args
