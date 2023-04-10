@@ -66,6 +66,14 @@ def get_args():
     return args
 
 
+_args = get_args()
+PER_PAGE = 100
+DOCKER_ENDPOINT = "ghcr.io"
+API_ENDPOINT = os.environ.get("GITHUB_API_URL", "https://api.github.com")
+GITHUB_TOKEN = _args.token
+DRY_RUN = _args.dry_run
+
+
 def request_github_api(url: str, method="GET", **options) -> requests.Response:
     """Make web request to GitHub API, returning response."""
     return requests.request(
@@ -89,10 +97,9 @@ def get_paged_resp(url: str, params: dict[str, Any] = None) -> Iterable[dict]:
     while True:
         if not (resp := request_github_api(url, params=params)):
             print(url)
-            raise Exception(resp.text)
+            raise Exception(resp.text[:50])
 
-        for objs in resp.json():
-            yield objs
+        yield from resp.json()
 
         # Continue with next page if one is found
         if "next" in resp.links:
@@ -102,17 +109,13 @@ def get_paged_resp(url: str, params: dict[str, Any] = None) -> Iterable[dict]:
             break
 
 
-PER_PAGE = 100
-DOCKER_ENDPOINT = "ghcr.io"
-API_ENDPOINT = os.environ.get("GITHUB_API_URL", "https://api.github.com")
-_args = get_args()
-
-REPO_OWNER = _args.repo_owner
-REPO_NAME = _args.repo_name
-PACKAGE_NAME = _args.package_name
-OWNER_TYPE = _args.owner_type
-GITHUB_TOKEN = _args.token
-DRY_RUN = _args.dry_run
+class TC:
+    """Ascii color codes."""
+    OKGREEN = lambda x: f"\033[92m{x}\033[0m"
+    OKBLUE = lambda x: f"\033[94m{x}\033[0m"
+    OKCYAN = lambda x: f"\033[96m{x}\033[0m"
+    WARNING = lambda x: f"\033[93m{x}\033[0m"
+    FAIL = lambda x: f"\033[91m{x}\033[0m"
 
 
 class Version:
@@ -145,9 +148,9 @@ class Version:
 
     def delete(self):
         """Delete this image version from the registry."""
-        print(f"Deleting {self.name}:", end=" ")
+        print(TC.WARNING("Deleting"), f"{self.name}:", end=" ")
         if DRY_RUN:
-            print("Dry Run")
+            print(TC.OKGREEN("Dry Run"))
             return True
 
         try:
@@ -156,7 +159,7 @@ class Version:
             print(e.response.reason if e.response else "Fatal error")
             return False
         else:
-            print("OK" if resp.status_code == 204 else resp.reason)
+            print(TC.OKGREEN("OK") if resp.status_code == 204 else resp.reason)
             return resp.ok
 
     def __hash__(self):
@@ -209,20 +212,32 @@ class Package:
             yield cls(owner, pkg)
 
 
-def run():
+def bulk_delete(delete_list: Iterable[Version]):
+    status_counts = [0, 0]  # [Fail, OK]
+    for unwanted_version in delete_list:
+        status = unwanted_version.delete()
+        status_counts[status] += 1
+
+    print("")
+    print(status_counts[1], TC.OKGREEN("Deletions"))
+    print(status_counts[0], TC.FAIL("Errors"))
+    if status_counts[0]:
+        sys.exit(1)
+
+
+def run() -> Iterable[Version]:
     # Get list of all packages
     all_packages = Package.get_all_packages(
-        owner=REPO_OWNER,
-        repo_name=REPO_NAME,
-        package_name=PACKAGE_NAME,
-        owner_type=OWNER_TYPE,
+        owner=_args.repo_owner,
+        repo_name=_args.repo_name,
+        package_name=_args.package_name,
+        owner_type=_args.owner_type,
     )
 
-    delete_list = []
     for pkg in all_packages:
         count = 0
         all_deps, all_untagged = set(), set()
-        print("Processing package:", pkg.name, end="... ")
+        print(TC.OKCYAN("Processing package:"), TC.OKBLUE(pkg.name), end="... ")
         for count, version in enumerate(pkg.get_versions(), start=1):
             deps = version.get_deps()
             all_deps.update(deps)
@@ -231,27 +246,15 @@ def run():
 
         # Collect list of all untagged versions that are not dependencies of other versions
         unwanted = [version for version in all_untagged if version.name not in all_deps]
-        delete_list.extend(unwanted)
         print(
-            f"(total={count},",
-            f"tagged={count - len(all_untagged)},",
-            f"untagged={len(all_untagged)},",
-            f"unwanted={len(unwanted)})",
+            f"({TC.OKGREEN('total')}={count},",
+            f"{TC.OKGREEN('tagged')}={count - len(all_untagged)},",
+            f"{TC.OKGREEN('untagged')}={len(all_untagged)},",
+            f"{TC.OKGREEN('unwanted')}={len(unwanted)})",
         )
-
-    if delete_list:
-        print("")
-        print("Deleting unwanted versions")
-        status_counts = [0, 0]  # [Fail, OK]
-        for unwanted_version in delete_list:
-            status = unwanted_version.delete()
-            status_counts[status] += 1
-
-        print(status_counts[1], "Deletions")
-        print(status_counts[0], "Errors")
-        if status_counts[0]:
-            sys.exit(1)
+        yield from unwanted
 
 
 if __name__ == "__main__":
-    run()
+    _delete_list = run()
+    bulk_delete(_delete_list)
