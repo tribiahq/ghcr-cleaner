@@ -125,7 +125,6 @@ DOCKER_ENDPOINT = "ghcr.io"
 API_ENDPOINT = os.environ.get("GITHUB_API_URL", "https://api.github.com")
 GITHUB_TOKEN = _args.token
 DRY_RUN = _args.dry_run
-print(_args)
 
 
 def request_github_api(url: str, method="GET", **options) -> requests.Response:
