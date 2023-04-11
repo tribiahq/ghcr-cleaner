@@ -1,5 +1,5 @@
-name: 'Delete untagged ghcr'
-author: 'Chuzkiyahu Raful'
+name: 'GHCR Cleaner'
+author: 'William Forde'
 description: 'Delete containers on github container registry without tags'
 branding:
   icon: 'trash-2'
