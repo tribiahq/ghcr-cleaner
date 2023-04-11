@@ -1,63 +1,106 @@
-# delete-untagged-ghcr-action V2
-[![test](https://github.com/quartx-analytics/delete-untagged-ghcr-action/actions/workflows/test.yml/badge.svg)](https://github.com/quartx-analytics/delete-untagged-ghcr-action/actions/workflows/test.yml)
+# Github container registry cleaner
+[![pylint](https://github.com/quartx-analytics/delete-untagged-ghcr-action/actions/workflows/pylint.yml/badge.svg)](https://github.com/quartx-analytics/delete-untagged-ghcr-action/actions/workflows/pylint.yml)
 
-Action for deleting containers from Github container registry.
+Action for deleting old containers from the Github container registry.
 
-Deletes all truly untagged ghcr containers in a repository. Tags that are not depended on by other tags
-will be deleted. This scenario can happen when using multiplatform packages.
+Deletes all truly untagged GHCR container images in a repository. Truly untagged images are images that
+are not depended on by other tags. This can happen when using multiplatform packages.
+Plus the newer versions of buildkit adds Provenance attestations witch add extra manifest data to each tagged image.
+This shows up as 'unknown/unknown' in the github registry page. Most other GHCR cleaners don't take this into
+account and can end up breaking tagged images.
 
-## Usage
+This action can also be configured to keep at most a specified amount of tagged images, removing all others after the cut off.
+The tags that are checked for removal can be controlled using tag filtering.
 
-<!-- start usage -->
+
+# Inputs
+
+## `token`
+
+**Required** Personal access token (PAT) used to fetch the repository. Needs `read:packages` and `delete:packages` permissions.
+
+## `repository-owner`
+
+The repository owner name. Default `"${{ github.repository_owner }}"`.
+
+## `repository-name`
+
+The repository name. Limits cleaning to only container images linked to the given repository.
+
+## `package-name`
+
+The package-name. Limits cleaning to image versions for the given package only.
+
+## `owner-type`
+
+**Required** Owner type (org or user).
+
+## `delete-untagged`
+
+Delete package versions that have no tags and are not a dependency of other tags. Default `"true"`.
+
+## `keep-at-most`
+
+Keep at most the given amount of image versions. Only applies to tagged images. Zero disables this feature. Default `"0"`.
+
+## `filter-tags`
+
+List of tags to filter for when using --keep-at-most. Accepts tags as Unix shell-style wildcards.
+
+## `skip-tags`
+
+List of tags to ignore when using --keep-at-most. Accepts tags as Unix shell-style wildcards.
+
+## `dry-run`
+
+Run the script without making any changes. Default `"false"`.
+
+
+# Usage
+
+## Delete all truly untagged image versions from all packages for the given owner.
 ```yaml
-- name: Delete untagged GHCR
-  uses: quartx-analytics/delete-untagged-ghcr-action@v2
+- uses: quartx-analytics/delete-untagged-ghcr-action@v1
   with:
-    # Personal access token (PAT) used to fetch the repository. The PAT is configured
-    # with the local git config, which enables your scripts to run authenticated git
-    # commands. The post-job step removes the PAT.
-    # needs delete:packages permissions
-    # required: true
-    # [Learn more about creating and using encrypted secrets](https://help.github.com/en/actions/automating-your-workflow-with-github-actions/creating-and-using-encrypted-secrets)
-    token: ${{ secrets.PAT_TOKEN }}
-    # 'The repository owner name'
-    # Default: ${{ github.repository_owner }}
-    repository-owner: ''
-    # Repository name or name with owner
-    # Delete only from repository name
-    repository-name: ''
-    # 'The package name'
-    # Delete only from package name
-    # required: false
-    package_name: ''
-    # the owner type
-    # required: true
-    # choices: org, user
-    owner_type: ''
-
+      owner-type: org # or user
+      token: ${{ secrets.PAT_TOKEN }}
+      repository_owner: ${{ github.repository_owner }}
+      delete-untagged: true
 ```
-<!-- end usage -->
 
-## Delete all containers from repository without tags except untagged multiplatform packages
+## Delete all truly untagged image versions with the given package name.
 ```yaml
-- name: Delete all containers from repository without tags
-  uses: quartx-analytics/delete-untagged-ghcr-action@v2
+- uses: quartx-analytics/delete-untagged-ghcr-action@v1
   with:
+      owner-type: org # or user
+      token: ${{ secrets.PAT_TOKEN }}
+      repository_owner: ${{ github.repository_owner }}
+      package-name: test-image
+      delete-untagged: true
+```
+
+## Only Keep the 5 most recent image versions, removing the rest. While also keeping untagged and only images related to given repository.
+```yaml
+- uses: quartx-analytics/delete-untagged-ghcr-action@v1
+  with:
+    owner-type: org # or user
     token: ${{ secrets.PAT_TOKEN }}
     repository_owner: ${{ github.repository_owner }}
     repository-name: ${{ github.repository }}
-    owner-type: org # or user
-
+    delete-untagged: false
+    keep-at-most: 5
 ```
 
-
-## Delete all containers from package without tags except untagged multiplatform packages
+## Keep the 5 most recent image versions that start with "v" while ignoring some tags. And remove all truly untagged images.
 ```yaml
-- name: Delete all containers from package without tags
-    uses: quartx-analytics/delete-untagged-ghcr-action@v2
-    with:
-        token: ${{ secrets.PAT_TOKEN }}
-        repository_owner: ${{ github.repository_owner }}
-        package_name: the-package-name
-        owner-type: org # or user
+- uses: quartx-analytics/delete-untagged-ghcr-action@v1
+  with:
+      owner-type: org # or user
+      token: ${{ secrets.PAT_TOKEN }}
+      repository_owner: ${{ github.repository_owner }}
+      package-name: test-image
+      delete-untagged: true
+      keep-at-most: 5
+      filter-tags: v*
+      skip-tags: latest,buildcache
 ```
