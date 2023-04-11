@@ -58,7 +58,7 @@ Run the script without making any changes. Default `false`.
 
 # Usage
 
-### Delete all truly untagged image versions from all packages for the given owner.
+#### Delete all truly untagged image versions from all packages for the given owner.
 ```yaml
 - uses: quartx-analytics/delete-untagged-ghcr-action@v1
   with:
@@ -68,7 +68,7 @@ Run the script without making any changes. Default `false`.
       delete-untagged: true
 ```
 
-### Delete all truly untagged image versions with the given package name.
+#### Delete all truly untagged image versions with the given package name.
 ```yaml
 - uses: quartx-analytics/delete-untagged-ghcr-action@v1
   with:
@@ -79,7 +79,7 @@ Run the script without making any changes. Default `false`.
       delete-untagged: true
 ```
 
-### Only Keep the 5 most recent image versions, removing the rest. While also keeping untagged and only images related to given repository.
+#### Only Keep the 5 most recent image versions, removing the rest. While also keeping untagged and only images related to given repository.
 ```yaml
 - uses: quartx-analytics/delete-untagged-ghcr-action@v1
   with:
@@ -91,7 +91,7 @@ Run the script without making any changes. Default `false`.
     keep-at-most: 5
 ```
 
-### Keep the 5 most recent image versions that start with "v" while ignoring some tags. And remove all truly untagged images.
+#### Keep the 5 most recent image versions that start with "v" while ignoring some tags. And remove all truly untagged images.
 ```yaml
 - uses: quartx-analytics/delete-untagged-ghcr-action@v1
   with:
