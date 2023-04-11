@@ -1,5 +1,5 @@
 # Github container registry cleaner
-[![pylint](https://github.com/quartx-analytics/delete-untagged-ghcr-action/actions/workflows/pylint.yml/badge.svg)](https://github.com/quartx-analytics/delete-untagged-ghcr-action/actions/workflows/pylint.yml)
+[![pylint](https://github.com/quartx-analytics/ghcr-cleaner/actions/workflows/pylint.yml/badge.svg)](https://github.com/quartx-analytics/ghcr-cleaner/actions/workflows/pylint.yml)
 
 Action for deleting old containers from the Github container registry.
 
@@ -60,7 +60,7 @@ Run the script without making any changes. Default `false`.
 
 #### Delete all truly untagged image versions from all packages for the given owner.
 ```yaml
-- uses: quartx-analytics/delete-untagged-ghcr-action@v1
+- uses: quartx-analytics/ghcr-cleaner@v1
   with:
       owner-type: org # or user
       token: ${{ secrets.PAT_TOKEN }}
@@ -70,7 +70,7 @@ Run the script without making any changes. Default `false`.
 
 #### Delete all truly untagged image versions with the given package name.
 ```yaml
-- uses: quartx-analytics/delete-untagged-ghcr-action@v1
+- uses: quartx-analytics/ghcr-cleaner@v1
   with:
       owner-type: org # or user
       token: ${{ secrets.PAT_TOKEN }}
@@ -81,7 +81,7 @@ Run the script without making any changes. Default `false`.
 
 #### Only Keep the 5 most recent image versions, removing the rest. While also keeping untagged and only images related to given repository.
 ```yaml
-- uses: quartx-analytics/delete-untagged-ghcr-action@v1
+- uses: quartx-analytics/ghcr-cleaner@v1
   with:
     owner-type: org # or user
     token: ${{ secrets.PAT_TOKEN }}
@@ -93,7 +93,7 @@ Run the script without making any changes. Default `false`.
 
 #### Keep the 5 most recent image versions that start with "v" while ignoring some tags. And remove all truly untagged images.
 ```yaml
-- uses: quartx-analytics/delete-untagged-ghcr-action@v1
+- uses: quartx-analytics/ghcr-cleaner@v1
   with:
       owner-type: org # or user
       token: ${{ secrets.PAT_TOKEN }}
