@@ -122,13 +122,14 @@ def get_args():
 _args = get_args()
 PER_PAGE = 100
 DOCKER_ENDPOINT = "ghcr.io"
-API_ENDPOINT = os.environ.get("GITHUB_API_URL", "https://api.github.com")
+GITHUB_API_URL = os.environ.get("GITHUB_API_URL", "https://api.github.com")
 GITHUB_TOKEN = _args.token
 DRY_RUN = _args.dry_run
 
 
 def request_github_api(url: str, method="GET", **options) -> requests.Response:
     """Make web request to GitHub API, returning response."""
+    url = urljoin(GITHUB_API_URL, url)
     return requests.request(
         method, url,
         headers={
@@ -146,7 +147,6 @@ def get_paged_resp(url: str, params: dict[str, Any] = None) -> Iterable[dict]:
     params = params or {}
     params.update(page="1")
     params.setdefault("per_page", min(PER_PAGE, 100))
-    url = urljoin(API_ENDPOINT, url)
 
     while True:
         resp = request_github_api(url, params=params)
