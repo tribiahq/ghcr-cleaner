@@ -1,4 +1,4 @@
-name: 'GHCR Cleaner'
+name: 'GHCR Cleaner (Hotfixed)'
 author: 'William Forde'
 description: 'Delete containers on github container registry without tags'
 branding:
